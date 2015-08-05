@@ -28,6 +28,7 @@
     },
     "dependencies": {
         "bbop-core": "0.0.5",
+	"bbop-graph-noctua": "0.0.18",
         "bbop-registry": "0.0.2",
         "bbop-response-barista": "0.0.3",
         "bbop-rest-manager": "0.0.6",
