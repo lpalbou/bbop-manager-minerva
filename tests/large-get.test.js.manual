@@ -53,9 +53,11 @@ describe('attack a server with a very very large GET (sync)', function(){
 
 	//var r = manager.get_meta();
  	var r = manager.request_with(reqs);
-	assert.isNotNull('has goodies');
-	
-	console.log('r', r);	
+	//console.log('r', r);	
+	assert.isAbove(r.relations().length, 0, 'has rels');
+	assert.isAbove(us.keys(r.models_meta()).length, 0, 'has models meta');
+	assert.isAbove(r.model_ids().length, 0, 'has model ids');
+	assert.isAbove(r.evidence().length, 0, 'has ev');
 
     });
 });
