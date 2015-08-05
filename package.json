@@ -33,8 +33,11 @@
         "bbop-rest-manager": "0.0.6",
         "bbop-rest-response": "0.0.3",
         "class-expression": "0.0.7",
+        "domino": "1.0.19",
+        "jquery": "2.1.4",
         "minerva-requests": "0.0.4",
-        "underscore": "1.8.3"
+        "underscore": "1.8.3",
+        "xmlhttprequest": "1.7.0"
     },
     "devDependencies": {
         "chai": "^2.3.0",
