@@ -1,0 +1,980 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta name="generator" content="JSDoc 3.3.2">
+  <meta charset="utf-8">
+  <title>Source: manager.js</title>
+  <link rel="stylesheet" href="https://brick.a.ssl.fastly.net/Karla:400,400i,700,700i" type="text/css">
+  <link rel="stylesheet" href="https://brick.a.ssl.fastly.net/Noto+Serif:400,400i,700,700i" type="text/css">
+  <link rel="stylesheet" href="https://brick.a.ssl.fastly.net/Inconsolata:500" type="text/css">
+  <link href="css/baseline.css" rel="stylesheet">
+</head>
+
+<body onload="prettyPrint()">
+  <nav id="jsdoc-navbar" role="navigation" class="jsdoc-navbar">
+    <div id="jsdoc-navbar-container">
+      <div id="jsdoc-navbar-content">
+        <a href="index.html" class="jsdoc-navbar-package-name">Home</a>
+      </div>
+    </div>
+  </nav>
+  <div id="jsdoc-body-container">
+    <div id="jsdoc-content">
+      <div id="jsdoc-content-container">
+        <div id="jsdoc-banner" role="banner">
+        </div>
+        <div id="jsdoc-main" role="main">
+          <header class="page-header">
+            <h1>Source: manager.js</h1>
+          </header>
+          <article>
+            <pre class="prettyprint linenums"><code>/**
+ * Manager for handling communication and callbacks with a Minerva
+ * instances (mediated by Barista).
+ *
+ * See also: {module:bbop-response-barista}
+ *
+ * @modules bbop-manager-minerva
+ */
+
+var bbop = require(&#x27;bbop-core&#x27;);
+var registry = require(&#x27;bbop-registry&#x27;);
+
+var us = require(&#x27;underscore&#x27;);
+
+var class_expression = require(&#x27;class-expression&#x27;);
+var requests = require(&#x27;minerva-requests&#x27;);
+//var rest_manager = require(&#x27;bbop-rest-manager&#x27;);
+var barista_response = require(&#x27;bbop-response-barista&#x27;);
+
+// Aliasing.
+var each = us.each;
+var request = requests.request;
+var request_set = requests.request_set;
+
+/**
+ * A manager for handling the AJAX and registry. Initial take from
+ * {module:bbop-rest-manager}.
+ * 
+ * @constructor
+ * @param {String} barista_location - string for invariant part of API
+ * @param {String} namespace - string for namespace of API to use
+ * @param {String} user_token - identifying string for the user of the manager (Barista token)
+ * @param {Object} engine - Remote resource manager client to use (must be an instantiated {module:bbop-rest-manager} engine)
+ * @param {String} mode - whether or not to have utility methods (most besides fetch_with and start_with be in); options are &quot;sync&quot; and &quot;async&quot;, which correspond to internally using fetch and start respectively
+ * @returns {manager} a classic manager
+ */
+var manager = function(barista_location, namespace, user_token, engine, mode){
+    registry.call(this, [&#x27;prerun&#x27;, // internal; anchor only
+			 &#x27;postrun&#x27;, // internal
+			 &#x27;manager_error&#x27;, // internal/external...odd
+			 //&#x27;success&#x27;, // uninformative
+			 &#x27;merge&#x27;,
+			 &#x27;rebuild&#x27;,
+			 &#x27;meta&#x27;,
+			 &#x27;warning&#x27;, // trump
+			 &#x27;error&#x27; //trump
+			]);
+    this._is_a = &#x27;bbop-manager-minerva&#x27;;
+    var anchor = this;
+
+    //var url = barista_location + &#x27;/api/&#x27; + namespace + &#x27;/m3Batch&#x27;;
+    anchor._batch_url = null;
+    anchor._seed_url = null;
+
+    anchor._user_token = user_token;
+
+    //  
+    anchor._engine = engine;
+    anchor._mode = mode;
+    anchor._runner = function(resource, payload){
+	var ret = null;
+	if( anchor._mode === &#x27;sync&#x27; ){
+	    ret = anchor._engine.fetch(resource, payload);
+	}else if( anchor._mode === &#x27;async&#x27; ){
+	    ret = anchor._engine.start(resource, payload);
+	}else{
+	    throw new Error(&#x27;&quot;mode&quot; not set in new bbop-manager-minerva&#x27;);
+	}
+	return ret;
+    };
+
+    // Will use this one other spot, where the user can change the
+    // token.
+    function _set_url_from_token(in_token){	
+
+	var batch_url =
+		barista_location + &#x27;/api/&#x27; + namespace + &#x27;/m3Batch&#x27;;
+	var seed_url =
+		barista_location + &#x27;/api/&#x27; + namespace + &#x27;/seed/fromProcess&#x27;;
+
+	if( in_token ){
+	    batch_url = batch_url + &#x27;Privileged&#x27;;
+	    seed_url = seed_url + &#x27;Privileged&#x27;;
+	}
+
+	anchor._batch_url = batch_url;
+	anchor._seed_url = seed_url;
+    }
+    _set_url_from_token(user_token);
+
+    // How to deal with failure.
+    function _on_fail(resp, man){	
+	var retval = null;
+
+	// See if we got any traction.
+	if( ! resp || ! resp.message_type() || ! resp.message() ){
+	    // Something dark has happened, try to put something
+	    // together.
+	    // console.log(&#x27;bad resp!?: &#x27;, resp);
+	    var resp_seed = {
+		&#x27;message_type&#x27;: &#x27;error&#x27;,
+		&#x27;message&#x27;: &#x27;deep manager error&#x27;
+	    };
+	    resp = new barista_response(resp_seed);
+	    retval = resp;
+	}
+	anchor.apply_callbacks(&#x27;manager_error&#x27;, [resp, anchor]);
+
+	return retval;
+    }
+    anchor._engine.register(&#x27;error&#x27;, _on_fail);
+
+    // When we have nominal success, we still need to do some kind of
+    // dispatch to the proper functionality.
+    function _on_nominal_success(resp, man){
+	var retval = resp;
+	
+	// Switch on message type when there isn&#x27;t a complete failure.
+	var m = resp.message_type();
+	if( m === &#x27;error&#x27; ){
+	    // Errors trump everything.
+	    anchor.apply_callbacks(&#x27;error&#x27;, [resp, anchor]);
+	}else if( m === &#x27;warning&#x27; ){
+	    // Don&#x27;t really have anything for warning yet...remove?
+	    anchor.apply_callbacks(&#x27;warning&#x27;, [resp, anchor]);
+	}else if( m === &#x27;success&#x27; ){
+	    var sig = resp.signal();
+	    if( sig === &#x27;merge&#x27; || sig === &#x27;rebuild&#x27; || sig === &#x27;meta&#x27; ){
+		//console.log(&#x27;run on signal: &#x27; + sig);
+		anchor.apply_callbacks(sig, [resp, anchor]);		
+	    }else{
+		alert(&#x27;unknown signal: very bad&#x27;);
+	    }
+	}else{
+	    alert(&#x27;unimplemented message_type&#x27;);	    
+	}
+
+	// Postrun goes no matter what.
+	anchor.apply_callbacks(&#x27;postrun&#x27;, [resp, anchor]);
+
+	return retval;
+    }
+    anchor._engine.register(&#x27;success&#x27;, _on_nominal_success);
+
+    ///
+    /// Control our identity.
+    ///
+
+    /**
+     * Get/set the user token.
+     * 
+     * @param {String} [user_token] - string to set user token to
+     * @returns {String} current user token
+     */
+    anchor.user_token = function(user_token){
+
+	// Adjust the internal token.
+	if( user_token ){
+	    anchor._user_token = user_token;
+	}
+
+	// Make sure we&#x27;re using the right URL considering how we&#x27;re
+	// identified.
+	_set_url_from_token(anchor._user_token);
+
+	return anchor._user_token;
+    };
+
+    ///
+    /// Actual mechanism.
+    ///
+
+    /**
+     * Trigger a rebuild {module:bbop-response-barista} with a model.
+     * 
+     * Intent: &quot;query&quot;.
+     * Expect: &quot;success&quot; and &quot;rebuild&quot;.
+     * 
+     * @param {String} model_id - string
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.get_model = function(model_id){
+
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.get_model();
+
+ 	return anchor.request_with(reqs);
+    };
+    
+    // /*
+    //  * Method: get_model_ids
+    //  * 
+    //  * Trigger meta {module:bbop-response-barista} with a list of all model
+    //  * ids.
+    //  * 
+    //  * Intent: &quot;query&quot;.
+    //  * Expect: &quot;success&quot; and &quot;meta&quot;.
+    //  * 
+    //  * @param {}    //  *  n/a
+    //  * 
+    //  * @returns {}    //  *  n/a
+    //  */
+    // anchor.get_model_ids = function(){
+
+    // 	// 
+    // 	var reqs = new request_set(anchor.user_token());
+    // 	var req = new request(&#x27;model&#x27;, &#x27;all-model-ids&#x27;);
+    // 	reqs.add(req);
+
+    // 	var args = reqs.callable();	
+    // 	anchor.apply_callbacks(&#x27;prerun&#x27;, [anchor]);
+    // 	jqm.action(anchor._batch_url, args, &#x27;GET&#x27;);
+    // };
+    
+    /**
+     * Trigger meta {module:bbop-response-barista} with a list of all model
+     * meta-information.
+     * 
+     * Intent: &quot;query&quot;.
+     * Expect: &quot;success&quot; and &quot;meta&quot;.
+     * 
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.get_meta = function(){
+
+	var reqs = new request_set(anchor.user_token());
+	reqs.get_meta();
+
+ 	return anchor.request_with(reqs);
+    };
+
+    /**
+     * Trigger meta {module:bbop-response-barista} of requested
+     * model&#x27;s undo/redo information.
+     * 
+     * This will make the request whether or not the user has an okay
+     * token defined.
+     *
+     * Intent: &quot;query&quot;.
+     * Expect: &quot;success&quot; and &quot;meta&quot;.
+     * 
+     * @param {String} model_id - string
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.get_model_undo_redo = function(model_id){
+
+	// 
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.get_undo_redo();
+
+ 	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger rebuild {module:bbop-response-barista} after an attempt
+     * to roll back the model to &quot;last&quot; state.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;rebuild&quot;.
+     * 
+     * @param {String} model_id - string
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.perform_undo = function(model_id){
+
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.undo_last_model_batch();
+
+ 	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger rebuild {module:bbop-response-barista} after an attempt
+     * to roll forward the model to &quot;next&quot; state.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;rebuild&quot;.
+     * 
+     * @param {String} model_id - string
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.perform_redo = function(model_id){
+
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.redo_last_model_batch();
+
+ 	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger merge (or possibly a rebuild)
+     * {module:bbop-response-barista} on attempt to add a single fact
+     * to a model.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;merge&quot;.
+     * 
+     * @param {String} model_id - string
+     * @param {String} source_id - string
+     * @param {String} target_id - string
+     * @param {String} rel_id - string
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.add_fact = function(model_id, source_id, target_id, rel_id){
+
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.add_fact([source_id, target_id, rel_id]);
+
+ 	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger merge (or possibly a rebuild)
+     * {module:bbop-response-barista} on attempt to remove a single
+     * fact to a model.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;merge&quot;.
+     * 
+     * @param {String} model_id - string
+     * @param {String} source_id - string
+     * @param {String} target_id - string
+     * @param {String} rel_id - string
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.remove_fact = function(model_id, source_id, target_id, rel_id){
+
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.remove_fact([source_id, target_id, rel_id]);
+
+ 	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger merge (or possibly a rebuild)
+     * {module:bbop-response-barista.response} on attempt to add a
+     * simple composite unit (class, enabled_by, and occurs_in) to a
+     * model.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;merge&quot;.
+     * 
+     * @param {String} model_id - string
+     * @param {String} cls_exp - anything taken by {module:class-expression}
+     * @param {String} [enabled_by_expr] - anything taken by {module:class-expression}
+     * @param {String} [occurs_in_expr] - anything taken by {module:class-expression}
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.add_simple_composite = function(model_id, cls_expr,
+    					   enabled_by_expr, occurs_in_expr){
+
+	// Minimal requirements.
+	var reqs = new request_set(anchor.user_token(), model_id);
+     	var ind = reqs.add_individual(cls_expr);
+
+	// Optional set expressions.
+	if( enabled_by_expr ){
+	    reqs.add_type_to_individual(
+		class_expression.svf(enabled_by_expr, &#x27;RO:0002333&#x27;), ind);
+	}
+	if( occurs_in_expr ){
+	    reqs.add_type_to_individual(
+		class_expression.svf(occurs_in_expr, &#x27;occurs_in&#x27;), ind);
+	}
+
+ 	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger merge (or possibly a rebuild)
+     * {module:bbop-response-barista.response} on attempt to add a
+     * complex class expression to an individual in a model.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;merge&quot;.
+     * 
+     * @param {String} model_id - string
+     * @param {String} individual_id - string
+     * @param {String} cls_expr - anything acceptible to {module:class-expression}
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.add_class_expression = function(model_id, individual_id, cls_expr){
+
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.add_type_to_individual(cls_expr, individual_id);
+
+	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger merge (or possibly a rebuild) {module:bbop-response-barista}
+     * on attempt to remove a complex class expression from an
+     * individual in a model.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;merge&quot;.
+     * 
+     * @param {String} model_id - string
+     * @param {String} individual_id - string
+     * @param {String} cls_expr - or anything acceptible to {module:class-expression}
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.remove_class_expression = function(model_id, individual_id, cls_expr){
+
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.remove_type_from_individual(cls_expr, individual_id);
+
+	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger a rebuild {module:bbop-response-barista} on attempt to remove
+     * an individual from a model.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;rebuild&quot;.
+     * 
+     * @param {String} model_id - string
+     * @param {String} individual_id - string
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.remove_individual = function(model_id, indv_id){
+
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.remove_individual(indv_id);
+
+	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger a rebuild response {module:bbop-response-barista} on
+     * attempting to create a new model...from nothing. Or something!
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;rebuild&quot;.
+     * 
+     * @param {String} taxon_id - *[DEPRECATED]* *[optional]* string (full ncbi)
+     * @param {String} class_id - *[DEPRECATED]* *[optional]* string
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.add_model = function(taxon_id, class_id){
+
+	// Conditions taken care of by request_set.
+	var reqs = new request_set(anchor.user_token());
+	reqs.add_model({&#x27;class-id&#x27;: class_id, &#x27;taxon_id&#x27;: taxon_id});
+	
+	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * *[DEPRECATED]*
+     * 
+     * Trigger a meta {module:bbop-response-barista} containing model
+     * export text.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;meta&quot;.
+     * 
+     * @deprecated
+     * @param {String} model_id - string
+     * @param {String} [format] - string (for legacy, &quot;gaf&quot; or &quot;gpad&quot;)
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.export_model = function(model_id, format){
+
+	if( typeof(format) === &#x27;undefined&#x27; ){ format = &#x27;default&#x27;; }
+
+	var reqs = new request_set(anchor.user_token());
+	var req = null;
+	if( format === &#x27;gaf&#x27; ){
+	    req = new request(&#x27;model&#x27;, &#x27;export-legacy&#x27;);
+	    req.special(&#x27;format&#x27;, &#x27;gaf&#x27;);
+	}else if( format === &#x27;gpad&#x27; ){
+	    req = new request(&#x27;model&#x27;, &#x27;export-legacy&#x27;);
+	    req.special(&#x27;format&#x27;, &#x27;gpad&#x27;);
+	}else{
+	    // Default (non-legacy) case is simpler.
+	    req = new request(&#x27;model&#x27;, &#x27;export&#x27;);
+	}
+
+	// Add the model to the request.
+	req.model(model_id);
+	reqs.add(req);
+
+	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * *[DEPRECATED]*
+     * 
+     * Trigger a rebuild response {module:bbop-response-barista} for a
+     * new model seeded/created from the argument string.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;rebuild&quot;.
+     * 
+     * @deprecated
+     * @param {String} model_string - string representation of a model
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.import_model = function(model_string){
+
+	// 
+	var reqs = new request_set(anchor.user_token());
+	var req = new request(&#x27;model&#x27;, &#x27;import&#x27;);
+	req.special(&#x27;importModel&#x27;, model_string);
+	reqs.add(req);
+
+	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger a rebuild response {module:bbop-response-barista} on a
+     * &quot;permanent&quot; store operation on a model.
+     *
+     * What?! A &quot;rebuild&quot; and not &quot;meta&quot;? Yes. This allows a workflow
+     * where a model is created, edited, and stored all in one pass.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;rebuild&quot;.
+     * 
+     * @param {String} model_id - string
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.store_model = function(model_id){
+
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.store_model();
+
+	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger a rebuild response {module:bbop-response-barista} on an
+     * evidence addition referencing an individual in a model.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;rebuild&quot;.
+     * 
+     * @param {String} model_id - string
+     * @param {String} indv_id - string
+     * @param {String} evidence_id - string
+     * @param {Array|String} source_ids - string or list of strings
+     * @param {Array|String|null} with_strs - string or list of strings or null
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.add_individual_evidence = function(model_id, indv_id, evidence_id,
+					      source_ids, with_strs){
+
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.add_evidence(evidence_id, source_ids, with_strs, indv_id, model_id);
+	
+	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger a rebuild response {module:bbop-response-barista} on an
+     * evidence addition referencing a fact in a model.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;rebuild&quot;.
+     * 
+     * @param {String} model_id - string
+     * @param {String} source_id - string
+     * @param {String} target_id - string
+     * @param {String} rel_id - string
+     * @param {String} evidence_id - string
+     * @param {Array|String} source_ids - string or list of strings
+     * @param {Array|String|null} with_strs - string or list of strings or null
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.add_fact_evidence = function(model_id,
+					source_id, target_id, rel_id,
+					evidence_id, source_ids, with_strs){
+
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.add_evidence(evidence_id, source_ids, with_strs,
+			  [source_id, target_id, rel_id], model_id);
+
+	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger a rebuild response {module:bbop-response-barista} on an
+     * evidence addition referencing an individual in a model.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;rebuild&quot;.
+     * 
+     * @param {String} model_id - string
+     * @param {String} evidence_individual_id - string
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.remove_evidence = function(model_id, evidence_individual_id){
+
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.remove_evidence(evidence_individual_id, model_id);
+	
+	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger a rebuild response {module:bbop-response-barista} on
+     * updating an entities annotations to a new set.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;rebuild&quot;.
+     * 
+     * @param {String} model_id - string
+     * @param {Object} entity - string
+     * @param {String} key - string
+     * @param {Array|String} values - string
+     * @param {String|null} [value_type] - string
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.update_annotations = function(model_id, entity,
+					 key, values, value_type){
+	
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.update_annotations(entity, key, values, value_type, model_id);
+	
+	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger a rebuild response {module:bbop-response-barista} on an
+     * annotation addition to an individual in a model.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;rebuild&quot;.
+     * 
+     * @param {String} model_id - string
+     * @param {String} indv_id - string
+     * @param {String} key - string
+     * @param {String} value - string
+     * @param {String|null} [value_type] - string
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.add_individual_annotation = function(model_id, indv_id,
+						key, value, value_type){
+
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.add_annotation_to_individual(key, value, value_type, indv_id);
+
+	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger a rebuild response {module:bbop-response-barista} on an
+     * annotation addition to a referenced fact (edge) in a model.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;rebuild&quot;.
+     * 
+     * @param {String} model_id - string
+     * @param {String} source_id - string
+     * @param {String} target_id - string
+     * @param {String} rel_id - string
+     * @param {String} key - string
+     * @param {String} value - string
+     * @param {String|null} [value_type] - string
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.add_fact_annotation = function(model_id,
+					  source_id, target_id, rel_id,
+					  key, value, value_type){
+
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.add_annotation_to_fact(key, value, value_type,
+				    [source_id, target_id, rel_id]);
+
+	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger a rebuild response {module:bbop-response-barista} on an
+     * annotation addition to a model.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;rebuild&quot;.
+     * 
+     * @param {String} model_id - string
+     * @param {String} key - string
+     * @param {String} value - string
+     * @param {String|null} [value_type] - string
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.add_model_annotation = function(model_id, key, value, value_type){
+
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.add_annotation_to_model(key, value, value_type);
+
+	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger a rebuild response {module:bbop-response-barista} on an
+     * annotation removeal from an individual in a model.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;rebuild&quot;.
+     * 
+     * @param {String} model_id - string
+     * @param {String} indv_id - string
+     * @param {String} key - string
+     * @param {String} value - string
+     * @param {String|null} [value_type] - string
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.remove_individual_annotation = function(model_id, indv_id,
+						   key, value, value_type){
+
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.remove_annotation_from_individual(key, value, value_type, indv_id);
+
+	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger a rebuild response {module:bbop-response-barista} on an
+     * annotation removeal from a referenced fact (edge) in a model.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;rebuild&quot;.
+     * 
+     * @param {String} model_id - string
+     * @param {String} source_id - string
+     * @param {String} target_id - string
+     * @param {String} rel_id - string
+     * @param {String} key - string
+     * @param {String} value - string
+     * @param {String|null} [value_type] - string
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.remove_fact_annotation = function(model_id,
+					     source_id, target_id, rel_id,
+					     key, value, value_type){
+
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.remove_annotation_from_fact(key, value, value_type,
+					 [source_id, target_id, rel_id]);
+
+	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger a rebuild response {module:bbop-response-barista} on an
+     * annotation removal from a model.
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;rebuild&quot;.
+     * 
+     * @param {String} model_id - string
+     * @param {String} key - string
+     * @param {String} value - string
+     * @param {String|null} [value_type] - string
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.remove_model_annotation = function(model_id, key, value, value_type){
+
+	var reqs = new request_set(anchor.user_token(), model_id);
+	reqs.remove_annotation_from_model(key, value, value_type);
+
+	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * WARNING: This is currently very very old code and is mostly
+     * here as a bookmark on where to restart.
+     * 
+     * Trigger a rebuild response {module:bbop-response-barista} on
+     * attempting to create a new model with information provided by
+     * Capella.
+     *
+     * If you&#x27;re attempting to use this, you probably want to revisit
+     * everything and everbody first...
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;rebuild&quot;.
+     * 
+     * @param {Object} bootstrap_obj - JSON object ???
+     * @param {String} term2aspect - ???
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.capella_bootstrap_model = function(bootstrap_obj, term2aspect){
+
+	var reqs = new request_set(anchor.user_token());
+
+	// Just get a new model going.
+	var req = new request(&#x27;model&#x27;, &#x27;generate-blank&#x27;);
+	//req.special(&#x27;db&#x27;, db_id); // unecessary
+	reqs.add(req);
+
+	each(bootstrap_obj, function(ob){
+
+	    // Now, for each of these, we are going to be adding
+	    // stuff to MF instances. If there is no MF coming
+	    // in, we are just going to use GO:0003674.
+	    var mfs = [];
+	    var bps = [];
+	    var ccs = [];
+	    each(ob[&#x27;terms&#x27;], function(tid){
+		if( term2aspect[tid] === &#x27;molecular_function&#x27; ){
+		    mfs.push(tid);
+		}else if( term2aspect[tid] === &#x27;biological_process&#x27; ){
+		    bps.push(tid);
+		}else if( term2aspect[tid] === &#x27;cellular_component&#x27; ){
+		    ccs.push(tid);
+		}
+	    });
+	    // There must be this no matter what.
+	    if( us.isEmpty(mfs) ){
+ 		mfs.push(&#x27;GO:0003674&#x27;);
+	    }
+
+	    // We are going to be creating instances off of the
+	    // MFs.
+	    each(mfs, function(mf){
+		var req = new request(&#x27;individual&#x27;, &#x27;add&#x27;);
+			  
+		// Add in the occurs_in from CC.
+		each(ccs, function(cc){
+		    req.add_svf_expression(cc, &#x27;occurs_in&#x27;);
+		});
+
+		// Add in the enabled_by from entities.
+		each(ob[&#x27;entities&#x27;], function(ent){
+		    req.add_svf_expression(ent, &#x27;RO:0002333&#x27;);
+		});
+	    });
+	});
+
+	// Final send-off.
+	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Trigger a rebuild response {module:bbop-response-barista} on
+     * attempting to create a new model with information provided by
+     * a seed service.
+     *
+     * This code will 
+     *
+     * Intent: &quot;action&quot;.
+     * Expect: &quot;success&quot; and &quot;rebuild&quot;.
+     * 
+     * @param {String} process_id - the GOlr resolvable process identifier
+     * @param {String} taxon_id - the GOlr resolvable taxon identifier
+     * @returns {module:bbop-barista-response#response} barista response
+     */
+    anchor.seed_from_process = function(process_id, taxon_id){
+
+	var reqs = new request_set(anchor.user_token());
+
+	// Just get a new model going.
+	var req = new request(&#x27;model&#x27;, &#x27;seed-from-process&#x27;);
+	req.special(&#x27;process&#x27;, process_id);
+	req.special(&#x27;taxon&#x27;, taxon_id);
+
+	reqs.add(req);
+
+	// Final send-off.
+	return anchor.request_with(reqs);
+    };
+    
+    /**
+     * Make a custom request with your own request set.
+     *
+     * Depending on the mode that you set, in addition to running the
+     * callbacks as usual, it will either return a response object
+     * (&quot;sync&quot;) or a deferred promise for the response object (&quot;async&quot;).
+     *
+     * Intent: ??? - whatever you set
+     * Expect: &quot;success&quot; and ??? (depends on your request)
+     * 
+     * @param {module:minerva-requests#request_set} request_set
+     * @param {String} [model_id] - string
+     * @returns {Object} the deferred Q promise for the eventual response
+     */
+    anchor.request_with = function(request_set, model_id){
+
+	// Assembly. Using callable() here seems to cause double
+	// encoding, so we&#x27;re doing it a little more manually.
+	//var args = request_set.callable();
+	var args = request_set.structure();
+	//console.log(&#x27;_args&#x27;, args);
+	var reqs = args[&#x27;requests&#x27;];
+	var str = JSON.stringify(reqs);
+	//var enc = encodeURIComponent(str);
+	args[&#x27;requests&#x27;] = str;
+
+	//console.log(&#x27;_batch_url&#x27;, anchor._batch_url);
+	//console.log(&#x27;_request_set&#x27;, request_set);
+	//console.log(&#x27;_args&#x27;, args);
+
+	// Take care of prerun now (postrun handled elsewhere).
+    	anchor.apply_callbacks(&#x27;prerun&#x27;, [anchor]);
+
+	// Get what ever output and move on. We&#x27;ll need to switch on
+	// whatever our target URL is.
+	var thing = null;
+	// Check if known seeding, then direct to known seeding service.
+	var rs = request_set.structure();
+	if( rs &amp;amp;&amp;amp; rs[&#x27;requests&#x27;] &amp;amp;&amp;amp; rs[&#x27;requests&#x27;][0] &amp;amp;&amp;amp;
+	    rs[&#x27;requests&#x27;][0][&#x27;operation&#x27;] &amp;amp;&amp;amp;
+	    rs[&#x27;requests&#x27;][0][&#x27;operation&#x27;] === &#x27;seed-from-process&#x27; ){
+		// seed
+		//console.log(&#x27;running to seeder&#x27;);
+		thing = anchor._runner(anchor._seed_url, args);
+	    }else{
+		// batch
+		thing = anchor._runner(anchor._batch_url, args);
+	    }
+	
+	return thing;
+    };    
+    
+};
+bbop.extend(manager, registry);
+
+///
+/// Exportable body.
+///
+
+module.exports = manager;
+</code></pre>
+          </article>
+        </div>
+      </div>
+      <nav id="jsdoc-toc-nav" role="navigation"></nav>
+    </div>
+  </div>
+  <footer id="jsdoc-footer" class="jsdoc-footer">
+    <div id="jsdoc-footer-container">
+      <p>
+        Generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc</a> 3.3.2 on September 29, 2015.
+      </p>
+    </div>
+  </footer>
+  <script src="scripts/jquery.min.js"></script>
+  <script src="scripts/jquery.cookie.js"></script>
+  <script src="scripts/tree.jquery.js"></script>
+  <script src="scripts/prettify.js"></script>
+  <script src="scripts/jsdoc-toc.js"></script>
+  <script src="scripts/linenumber.js"></script>
+  <script src="scripts/scrollanchor.js"></script>
+</body>
+
+</html>
