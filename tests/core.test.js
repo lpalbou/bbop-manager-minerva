@@ -30,10 +30,10 @@ var node_engine = require('bbop-rest-manager').node;
 
 //var barista_location = 'http://localhost:3400';
 //var barista_profile = 'minerva_local';
-var barista_location = 'http://toaster.lbl.gov:3399';
-var barista_profile = 'minerva_public_dev';
-//var barista_location = 'http://barista.berkeleybop.org';
-//var barista_profile = 'minerva_public';
+//var barista_location = 'http://toaster.lbl.gov:3399';
+//var barista_profile = 'minerva_public_dev';
+var barista_location = 'http://barista.berkeleybop.org';
+var barista_profile = 'minerva_public';
 
 describe('overall bbop-manager-minerva', function(){
 
