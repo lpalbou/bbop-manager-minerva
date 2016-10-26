@@ -5,6 +5,8 @@
 Manager for handling communication and callbacks with a Minerva
 instances (mediated by Barista).
 
+You may be looking for the [Minerva request API](https://github.com/berkeleybop/bbop-manager-minerva/wiki/MinervaRequestAPI).
+
 ### Availability
 
 [GitHub](https://github.com/berkeleybop/bbop-manager-minerva)
