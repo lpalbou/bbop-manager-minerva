@@ -52,7 +52,7 @@ describe('overall bbop-manager-minerva', function(){
 					  null, engine_to_use, 'sync');
 	
 	var r = manager.get_meta();
-	console.log('r', r.models_meta());
+	//console.log('r', r.models_meta());
 	assert.isAbove(r.relations().length, 0, 'has rels');
 	assert.isAbove(us.keys(r.models_meta()).length, 0, 'has model meta');
 	assert.isAbove(r.model_ids().length, 0, 'has model ids');
