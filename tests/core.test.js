@@ -28,29 +28,31 @@ var node_engine = require('bbop-rest-manager').node;
 /// Start unit testing.
 ///
 
-//var barista_location = 'http://localhost:3400';
-//var barista_profile = 'minerva_local';
+var barista_location = 'http://localhost:3400';
+var barista_profile = 'minerva_local';
 //var barista_location = 'http://toaster.lbl.gov:3399';
 //var barista_profile = 'minerva_public_dev';
-var barista_location = 'http://barista.berkeleybop.org';
-var barista_profile = 'minerva_public';
+//var barista_location = 'http://barista.berkeleybop.org';
+//var barista_profile = 'minerva_public';
+
+var timeout = 60000;
 
 describe('overall bbop-manager-minerva', function(){
 
     it('trying the basics with an easy manager (sync)', function(){
+	this.timeout(timeout); // doing a much of things, could take a while
 
 	// Create an engine (technically a lower-level manager) to
 	// make it all run.
 	var engine_to_use = new sync_engine(barista_response);
 	//var engine_to_use = new node_engine(barista_response);
 	//engine_to_use.debug(true);
-	//engine_to_use.method('GET');
 	engine_to_use.method('GET');
 	var manager = new minerva_manager(barista_location, barista_profile,
 					  null, engine_to_use, 'sync');
 	
 	var r = manager.get_meta();
-	//console.log('r', r.models_meta());
+	console.log('r', r.models_meta());
 	assert.isAbove(r.relations().length, 0, 'has rels');
 	assert.isAbove(us.keys(r.models_meta()).length, 0, 'has model meta');
 	assert.isAbove(r.model_ids().length, 0, 'has model ids');
@@ -59,6 +61,7 @@ describe('overall bbop-manager-minerva', function(){
     });
 
     it('trying the basics with an async manager', function(done){
+	this.timeout(timeout); // doing a much of things, could take a while
 
 	// 
 	var engine_to_use = new node_engine(barista_response);
@@ -107,6 +110,7 @@ describe('model work using jQuery', function(){
     });
 
     it('trying the basics with a jQuery manager', function(done){
+	this.timeout(timeout); // doing a much of things, could take a while
 
 	// 
 	manager.get_meta().then(function(r){
@@ -120,7 +124,7 @@ describe('model work using jQuery', function(){
     });
 
     it('things we know about a model', function(done){
-	this.timeout(60000); // doing a much of things, could take a while
+	this.timeout(timeout); // doing a much of things, could take a while
 
 	// Like there is one, and it needs at least a single
 	// individual to be saved right now.

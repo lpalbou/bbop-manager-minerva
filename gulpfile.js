@@ -108,7 +108,7 @@ gulp.task('git-tag', function(){
     var pkg = require('./package.json');
     var pver = pkg.version;
     git.tag('go-exp-widget-' + pver, 'version message', function (err){
-	if(err) throw err;
+	if(err){ throw err; }
     });
 });
 
