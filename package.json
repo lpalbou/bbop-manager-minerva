@@ -1,6 +1,6 @@
 {
     "name": "bbop-manager-minerva",
-    "version": "0.0.14",
+    "version": "0.0.15",
     "license": "BSD-3-Clause",
     "description": "Manager for handling communication and callbacks with a Minerva instances (mediated by Barista).",
     "keywords": [
