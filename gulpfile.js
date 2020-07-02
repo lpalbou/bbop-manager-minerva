@@ -59,7 +59,7 @@ gulp.task('doc', ['jsdoc']);
 gulp.task('jsdoc', ['clean'], function(cb) {
     gulp.src('')
         .pipe(shell([
-	    './node_modules/.bin/jsdoc --verbose --template ./node_modules/jsdoc-baseline --readme ./README.md --destination ./doc/ ./lib/*.js'
+	    './node_modules/.bin/jsdoc --verbose --readme ./README.md --destination ./doc/ ./lib/*.js'
 	]));
     cb(null);
 });
@@ -89,7 +89,7 @@ gulp.task('publish-npm', function() {
     var npm = require("npm");
     npm.load(function (er, npm) {
 	// NPM
-	npm.commands.publish();	
+	npm.commands.publish();
     });
 });
 

@@ -1,6 +1,6 @@
 {
     "name": "bbop-manager-minerva",
-    "version": "0.0.16",
+    "version": "0.0.19",
     "license": "BSD-3-Clause",
     "description": "Manager for handling communication and callbacks with a Minerva instances (mediated by Barista).",
     "keywords": [
@@ -52,7 +52,8 @@
         "gulp-rename": "^1.2.2",
         "gulp-shell": "^0.6.5",
         "gulp-uglify": "^3.0.0",
-        "jsdoc": "^3.3.0"
+        "jsdoc": "^3.3.0",
+        "npm": "3.10.10"
     },
     "bundleDependencies": [],
     "private": false,
