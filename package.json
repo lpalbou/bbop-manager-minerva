@@ -1,5 +1,5 @@
 {
-    "name": "bbop-manager-minerva",
+    "name": "lpadev-bbop-manager-minerva",
     "version": "0.0.20",
     "license": "BSD-3-Clause",
     "description": "Manager for handling communication and callbacks with a Minerva instances (mediated by Barista).",
@@ -31,7 +31,7 @@
         "bbop-graph-noctua": "0.0.35",
         "bbop-registry": "0.0.3",
         "bbop-response-barista": "0.0.9",
-        "bbop-rest-manager": "0.0.10",
+        "bbop-rest-manager": "0.0.18",
         "bbop-rest-response": "0.0.4",
         "class-expression": "0.0.11",
         "domino": "1.0.19",
